@@ -703,6 +703,12 @@ void ElfLinkerArm64LE::relocate1(const Relocation *rel, byte *location, upx_uint
         upx_uint32_t const m26 = ~(~0u << 26);
         upx_uint32_t w = get_le32(location);
         set_le32(location, (w & ~m26) | (m26 & (value >> 2)));
+    } else if (!strcmp(type, "TSTBR14")) {
+        // TBZ/TBNZ instruction - 14-bit PC-relative branch
+        value -= rel->section->offset + rel->offset;
+        upx_uint32_t const m14 = ~(~0u << 14);
+        upx_uint32_t w = get_le32(location);
+        set_le32(location, (w & ~(m14 << 5)) | ((m14 & (value >> 2)) << 5));
     } else
         super::relocate1(rel, location, value, type);
 }

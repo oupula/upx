@@ -75,7 +75,11 @@ eof_n2b:
 #endif
 
         mov x0,x5  // result value
+#ifdef NO_EOF_RET
+        b       eof_n2b_done  // Jump to end of section instead of ret
+#else
         ret
+#endif
 
 #endif  // WINDOWS_BACK  || ! DAISY_CHAIN }
 
@@ -125,6 +129,12 @@ copy_n2b:  // copy 1+len bytes
 not_n2b:
 #endif
         # fall into daisy chain
+
+#ifdef NO_EOF_RET
+eof_n2b_done:
+        // Fall through to next section (NRV2B_DONE)
+#endif
+
     .unreq lr
     .unreq ip0
 

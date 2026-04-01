@@ -75,6 +75,7 @@ NBPW= 8
 .endm
 
 .macro          sync_cache  // In: x0= lo; x1= hi; uses x2,x3,x4
+#ifndef NO_SYNC_CACHE
         mrs x3, ctr_el0
         tbnz w3, #28, 1f  // not needed
         ubfx x2, x3, #16, #4  // -2+ log2(dline_size)
@@ -106,6 +107,7 @@ NBPW= 8
 3:
         dsb ish
         isb  // Instruction Sync Barrier
+#endif  // NO_SYNC_CACHE
 .endm
 
 #endif  //}

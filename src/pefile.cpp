@@ -138,13 +138,13 @@ bool PeFile::testUnpackVersion(int version) const {
     // known but not (yet?) supported
     if (cpu == IMAGE_FILE_MACHINE_ARMNT)
         throwCantPack("win32/armnt is not supported"); // obsolete
-    if (cpu == IMAGE_FILE_MACHINE_ARM64)
-        throwCantPack("win64/arm64 is not yet supported");
     // FIXME: it seems that arm64ec actually uses MACHINE_AMD64 ???
     if (cpu == IMAGE_FILE_MACHINE_ARM64EC)
         throwCantPack("win64/arm64ec is not yet supported");
 
     // supported
+    if (cpu == IMAGE_FILE_MACHINE_ARM64)
+        return UPX_F_W64PE_ARM64;
     if (cpu == IMAGE_FILE_MACHINE_AMD64)
         return UPX_F_W64PE_AMD64;
     if (cpu == IMAGE_FILE_MACHINE_ARM || cpu == IMAGE_FILE_MACHINE_THUMB)
@@ -2640,7 +2640,7 @@ void PeFile::pack0(OutputFile *fo, ht &ih, ht &oh, unsigned subsystem_mask,
         osection[2].vsize = (osection[2].size + ncsize_virt_increase + oam1) & ~oam1;
         oh.imagesize = osection[2].vaddr + osection[2].vsize;
         osection[0].rawdataptr = (pe_offset + sizeof(ht) + sizeof_osection + fam1) & ~(size_t) fam1;
-        osection[1].rawdataptr = osection[0].rawdataptr;
+        osection[1].rawdataptr = osection[0].rawdataptr + osection[0].size;
     } else {
         osection[1].vsize = osection[1].size;
         osection[2].vsize = osection[2].size;
@@ -2649,7 +2649,8 @@ void PeFile::pack0(OutputFile *fo, ht &ih, ht &oh, unsigned subsystem_mask,
     }
     osection[2].rawdataptr = osection[1].rawdataptr + osection[1].size;
 
-    osection[0].flags = IMAGE_SCN_CNT_UNINITIALIZED_DATA | IMAGE_SCN_MEM_READ |
+    // ARM64 Windows requires CODE flag for writable+executable sections
+    osection[0].flags = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_READ |
                         IMAGE_SCN_MEM_WRITE | IMAGE_SCN_MEM_EXECUTE;
     osection[1].flags = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE |
                         IMAGE_SCN_MEM_EXECUTE;
