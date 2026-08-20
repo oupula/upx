@@ -169,7 +169,14 @@ section NRV_HEAD
 5:      sub     sp, sp, #0x10
         str     w9, [sp]
         mov     x3, sp                 // x3 = &plen_dst
-        b       NRV2B                  // explicit jump to avoid alignment padding
+        // All three NRV decoders are call-convention functions (they PUSH lr
+        // at entry and POP lr + ret at eof), so enter them with bl. The
+        // decoder's own PUSH/POP balances the saved lr; our 0x10 argument
+        // area is released right after the call returns. DECOMPRESS_ENTRY is
+        // defined by defineSymbols() as the linked decoder's entry address.
+        bl      DECOMPRESS_ENTRY
+        add     sp, sp, #0x10          // undo the sub above
+        b       PEMAIN10
 
         // Windows doesn't support dc/ic cache instructions in user mode
 #define NO_SYNC_CACHE 1
@@ -190,33 +197,60 @@ section NRV_HEAD
 
 off     .req w5
 
-// Skip ret in eof_n2b so NRV2B falls through
-#define NO_EOF_RET 1
-
 section NRV2B
 #include "arch/arm64/v8/nrv2b_d32.S"
-
-// After NRV2B decompression, jump to PEMAIN10 (skip NRV2D/NRV2E/LZMA)
-section NRV2B_DONE
-        add     sp, sp, #0x10          // undo NRV_HEAD's sub sp, sp, #0x10
-        b       PEMAIN10
 
 section NRV2D
 #include "arch/arm64/v8/nrv2d_d32.S"
 
-section NRV2D_DONE
-        add     sp, sp, #0x10          // undo NRV_HEAD's sub sp, sp, #0x10
-        b       PEMAIN10
-
 section NRV2E
 #include "arch/arm64/v8/nrv2e_d32.S"
 
-section NRV2E_DONE
-        add     sp, sp, #0x10          // undo NRV_HEAD's sub sp, sp, #0x10
-        b       PEMAIN10
-
 
 section LZMA_HEAD
+        // Setup decompression parameters like NRV_HEAD does:
+        // x0=src, w1=c_len, x2=dst, x3=&u_len (lzma_d.S calling convention).
+        // lzma_c_len symbol is defined as ph.c_len - 2 by defineSymbols();
+        // the decoder subtracts 2 more for the property bytes, so pass the
+        // FULL compressed length here (c_len-2 + 2).
+        mov     x0, x19                // x0 = src (compressed data)
+        mov     x2, x20                // x2 = dst (decompression target)
+        ldr     w1, 1f                 // w1 = lzma_c_len - 2 (symbol value)
+        ldr     w3, 3f                 // w3 = lzma_u_len (uncompressed length)
+        add     w1, w1, #2             // w1 = full compressed length
+        b       5f
+1:      .4byte  lzma_c_len
+3:      .4byte  lzma_u_len
+5:      sub     sp, sp, #0x20          // 0x20 (not 0x10): keeps sp 16-byte
+                                       // aligned AFTER bl pushes lr (8 bytes)
+                                       // — the Clang-built decoder uses SIMD
+                                       // stores that fault on misaligned sp.
+        str     w3, [sp]
+        mov     x3, sp                 // x3 = &u_len
+        // The DEC20 (Clang) decoder clobbers x25 (image_base) even though
+        // PEMAIN20 expects it to survive; save it across the call.
+        str     x25, [sp, #8]
+        // lzma_d.S's range decoder never initializes the Code register (w12):
+        // rcInit2 does "orr Code,t0,Code,lsl #8" which assumes Code==0 on
+        // entry. Other callers (darwin) happen to enter with w12==0; clear
+        // it here or decoding starts from a garbage range state and stops
+        // after a few hundred bytes.
+        mov     w12, #0
+        // The DEC20 (Clang) decoder blob was compiled for arm64-LINUX and
+        // freely uses x18 as a scratch register — 49k+ writes during one
+        // decode. On Windows arm64 x18 is the TEB pointer; clobbering it
+        // crashes the CRT/ntdll after we jump to the original entry.
+        // Save/restore it across the decoder call.
+        str     x18, [sp, #16]
+        bl      LZMA_ELF00             // lzma_d.S is call semantics (PUSH4 lr / ret)
+        ldr     x18, [sp, #16]         // restore TEB
+        // lzma_d.S returns here; it POP4'd its own frame, our 0x20 remains.
+        ldr     x25, [sp, #8]          // restore image_base (clobbered by decoder)
+        add     sp, sp, #0x20          // undo the sub above
+        b       PEMAIN10               // skip past the decoder sections (they
+                                       // are linked after LZMA_HEAD; falling
+                                       // through would re-enter the decoder)
+
         // Windows doesn't support dc/ic cache instructions in user mode
 #ifndef NO_SYNC_CACHE
 #define NO_SYNC_CACHE 1
@@ -225,6 +259,7 @@ section LZMA_HEAD
 #include "arch/arm64/v8/lzma_d.S"
 
 section LZMA_TAIL
+        b       PEMAIN10
 decompress_done:
 
 // =============

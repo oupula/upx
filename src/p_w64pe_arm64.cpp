@@ -88,9 +88,9 @@ void PackW64PeArm64::buildLoader(const Filter *ft) {
 
               M_IS_LZMA(ph.method) ? "LZMA_HEAD,LZMA_ELF00,LZMA_DEC20,LZMA_TAIL"
 
-              : M_IS_NRV2B(ph.method) ? "NRV_HEAD,NRV2B,NRV2B_DONE"
-              : M_IS_NRV2D(ph.method) ? "NRV_HEAD,NRV2D,NRV2D_DONE"
-              : M_IS_NRV2E(ph.method) ? "NRV_HEAD,NRV2E,NRV2E_DONE"
+              : M_IS_NRV2B(ph.method) ? "NRV_HEAD,NRV2B"
+              : M_IS_NRV2D(ph.method) ? "NRV_HEAD,NRV2D"
+              : M_IS_NRV2E(ph.method) ? "NRV_HEAD,NRV2E"
                                       : "UNKNOWN_COMPRESSION_METHOD",
               "", "PEMAIN10");
     // Add jump to skip alignment padding between sections
@@ -212,6 +212,17 @@ void PackW64PeArm64::defineSymbols(unsigned ncsection, unsigned upxsection, unsi
     }
 
     linker->defineSymbol("START", upxsection);
+
+    // NRV_HEAD ends with "bl DECOMPRESS_ENTRY"; the NRV decoders are
+    // call-convention functions (PUSH lr / POP lr + ret), so they must be
+    // entered with bl. Point DECOMPRESS_ENTRY at the linked decoder's
+    // section start; the linker patches the CALL26 relative branch.
+    if (M_IS_NRV2B(ph.method))
+        linker->defineSymbol("DECOMPRESS_ENTRY", linker->getSymbolOffset("NRV2B"));
+    else if (M_IS_NRV2D(ph.method))
+        linker->defineSymbol("DECOMPRESS_ENTRY", linker->getSymbolOffset("NRV2D"));
+    else if (M_IS_NRV2E(ph.method))
+        linker->defineSymbol("DECOMPRESS_ENTRY", linker->getSymbolOffset("NRV2E"));
 }
 
 void PackW64PeArm64::setOhHeaderSize(const pe_section_t *osection) {
