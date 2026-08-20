@@ -87,6 +87,7 @@ section PEISEFI0
 section PEISDLL1
         cmp     w1, #1          // DLL_PROCESS_ATTACH
         b.ne    reloc_end_jmp
+        b       PEMAIN01        // skip inter-section alignment padding
 section PEMAIN01
         // Save callee-saved registers
         stp     x19, x20, [sp, #-0x60]!

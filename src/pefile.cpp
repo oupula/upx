@@ -1576,6 +1576,44 @@ void PeFile::processLoadConf(Interval *iv) { // pass 1
     mb_oloadconf.alloc(soloadconf);
     oloadconf = (byte *) mb_oloadconf.getVoidPtr();
     memcpy(oloadconf, loadconf, soloadconf);
+
+    // ARM64 Windows: the loader validates Guard* fields in the load config
+    // even when IMAGE_DLLCHARACTERISTICS_GUARD_CF is NOT set. lld-produced
+    // DLLs can carry half-initialized garbage (e.g. GuardCFDispatchFunction
+    // Pointer = 0x100) that makes LoadLibrary fail with ERROR_BAD_EXE_FORMAT
+    // (193) on the packed DLL. Sanitize the Guard family of fields: keep
+    // SecurityCookie (stack protector still works via the unpacked image),
+    // zero the CFG/XFG tables, function pointers and counts.
+    // Sanitize unconditionally: Guard* fields are only meaningful when
+    // IMAGE_DLLCHARACTERISTICS_GUARD_CF is set (handled elsewhere, requiring
+    // --force); with the flag clear, nonzero Guard pointers/tables are
+    // linker garbage that the ARM64 Windows loader rejects with
+    // ERROR_BAD_EXE_FORMAT (193). Zeroing them is safe on all architectures.
+    if (soloadconf > 0x70) {
+        struct GuardField {
+            unsigned offset, size;
+        };
+        static constexpr GuardField guard_fields[] = {
+            {0x88, 8},  // GuardCFCheckFunctionPointer
+            {0x90, 8},  // GuardCFDispatchFunctionPointer
+            {0x98, 8},  // GuardCFFunctionTable
+            {0xa0, 8},  // GuardCFFunctionCount
+            {0xa8, 4},  // GuardFlags
+            {0xb0, 8},  // CodeIntegrity.Flags (strictly not Guard, but paired)
+            {0xd0, 8},  // GuardAddressTakenIatEntryTable
+            {0xd8, 8},  // GuardAddressTakenIatEntryCount
+            {0xe0, 8},  // GuardLongJumpTargetTable
+            {0xe8, 8},  // GuardLongJumpTargetCount
+            {0x118, 8}, // GuardEHContinuationTable
+            {0x120, 8}, // GuardEHContinuationCount
+            {0x130, 8}, // GuardXFGTable
+            {0x138, 8}, // GuardXFGCount
+        };
+        for (const auto &g : guard_fields) {
+            if (g.offset + g.size <= soloadconf)
+                memset(oloadconf + g.offset, 0, g.size);
+        }
+    }
 }
 
 void PeFile::processLoadConf(Reloc *rel, const Interval *iv,
