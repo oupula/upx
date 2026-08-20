@@ -60,7 +60,26 @@ t1x  .req x8
         lslv t0,t0,t1  // 2*LZMA_LIT_SIZE << (lit_context_bits + lit_pos_bits)
 #define W 4  /* even #bits to round up so that 8 bits span all the 1's */
         add t0,t0,#((~(~0<<W) + 2*LZMA_BASE_SIZE)>>W)<<W  // 0 mod 16
+        // +16: room for the 4-byte state header (lc/lp/pb + pad) below the
+        // probability array and a spare inSizeProcessed slot above it. See
+        // the layout comment at "State= 0" below.
+        add t0,t0,#16
 
+        mov t1x,sp
+        // Stack probe: touch each page of the region we are about to use.
+        // On Windows the thread stack grows on demand via a guard page just
+        // below sp; writing at a large offset above the final sp (as the
+        // decoder does when initializing its probability array) skips the
+        // guard and faults. Probing page by page commits the pages first.
+        // x9 = final sp target; probe from (sp - t0) upward a page at a time.
+        mov x9,sp
+        sub x9,x9,t0,uxtw
+1:      cmp x9,t1x
+        bhs 2f
+        ldr wzr,[x9]
+        add x9,x9,#0x1000
+        b 1b
+2:
         mov t1x,sp
         sub sp,sp,t0,uxtw
         mov x4,sp
@@ -82,16 +101,22 @@ a6 .req x6  /* &outSizeProcessed */
 //      a1= inp,  a2= inSize,  a3= &inSizeProcessed,
 //      a4= outp, a5= outSize, a6= &outSizeProcessed
 //)
-        stp xzr,xzr,[sp,#-2*NBPW]!  // clear CLzmaDecoderState, inSizeProcessed
-
         mov a6,ldst  // &outSizeProcessed
         ldr a5,[a6]  // outSize
         mov a4,dst  // outp
-        add a3,sp,#NBPW  // &inSizeProcessed
-        sub w2,lsrc,#2  // inSize
         mov a1,src  // inp
+        // Decoder memory contract (both DEC10 and DEC20): probability array
+        // starts at (vs + 4) and extends 2*count bytes upward. Layout of the
+        // alloca'd region (t0 = 2*count + 16, all zeroed):
+        //   [newsp+0  .. +3]    state header: lc/lp/pb (+pad)
+        //   [newsp+4  .. +2*count+4)  probability array
+        //   [oldsp-8  .. -4]    inSizeProcessed slot (8 bytes above the array
+        //                        tail + pad; the decoder writes its consumed
+        //                        length here, the array never reaches it)
 State= 0
         add a0,sp,#State
+        add a3,t1x,#-8  // &inSizeProcessed, at the top of the alloca region
+        sub w2,lsrc,#2  // inSize
 
         ldrb t0,[a1],#1  // first byte, replaces LzmaDecodeProperties()
         and  t0,t0,#7  // posBits

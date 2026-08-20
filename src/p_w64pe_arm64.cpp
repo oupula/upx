@@ -201,10 +201,13 @@ void PackW64PeArm64::defineSymbols(unsigned ncsection, unsigned upxsection, unsi
     linker->defineSymbol("start_of_compressed", esi0);
     linker->defineSymbol("compressed_len", ph.c_len);
     linker->defineSymbol("uncompressed_len", ph.u_len);
-    // code_rva: RVA of the code label in PEMAIN01 for image base calculation
-    // upxsection is the RVA where UPX loader starts, add offset to the label
-    // Label 0 is at offset 0x28 due to .balign 8 padding
-    linker->defineSymbol("code_rva", upxsection + 0x28);
+    // code_rva: RVA of the LBASE label in PEMAIN01 for image base calc.
+    // The label's offset within the linked loader is layout-dependent
+    // (PEISDLL0/PEISDLL1 prefix sections shift it for DLLs), so query the
+    // linker instead of hard-coding 0x28 — the old constant was wrong for
+    // DLLs (base off by the 24-byte PEISDLL prefix => every image_base+
+    // RVA address wrong => LZMA read garbage props => stack smashing).
+    linker->defineSymbol("code_rva", upxsection + linker->getSymbolOffset("LBASE"));
 
     if (use_tls_callbacks) {
         linker->defineSymbol("tls_callbacks_ptr", tlscb_ptr - ih.imagebase);

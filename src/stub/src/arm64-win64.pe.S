@@ -105,8 +105,10 @@ section PEMAIN01
         ldr     x9, 1f                 // x9 = RVA of label 0 (filled by linker)
         b       2f
         .balign 8
-0:                                     // This label's address
-1:      .8byte  code_rva               // RVA of label 0
+0:
+LBASE: .globl LBASE                   // named so defineSymbols can query
+                                       // its offset via linker->getSymbolOffset
+1:      .8byte  code_rva               // RVA of label 0 = upxsection + LBASE_OFF
 2:      sub     x25, x19, x9           // x25 = image base (VA - RVA) - SAVED
         ldr     x9, 3f
         b       4f
@@ -510,7 +512,11 @@ section PEMAIN20
         ldp     x23, x24, [sp, #0x20]
         ldp     x21, x22, [sp, #0x10]
         ldp     x19, x20, [sp], #0x60
-        b       PEDOJUMP               // explicit jump to avoid alignment padding
+        // Fall through to PEMAIN21/PEISDLL9/PERETURN|PEDOJUMP as linked by
+        // buildLoader. A hard "b PEDOJUMP" here used to skip PEISDLL9 —
+        // the DllMain argument restore and its stack cleanup (add sp,#0x30)
+        // — so the original entry was reached with a corrupted stack and
+        // garbage arguments (observed: pc=1 crash inside FreeRDP's DllMain).
 
 section CLEARSTACK
         // Clear dirty stack (128 bytes)
