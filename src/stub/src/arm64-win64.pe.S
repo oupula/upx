@@ -81,6 +81,19 @@ section PEISDLL0
         str     x0, [sp, #-0x30]!
         str     x1, [sp, #0x08]
         str     x2, [sp, #0x10]
+        // x0 = hModule = image base on EVERY DllMain invocation. PEDOJUMP
+        // computes the original entry as x25 + OEP_RVA, but x25 is only
+        // initialized on the DLL_PROCESS_ATTACH path (PEMAIN01); on re-entry
+        // (THREAD_ATTACH/THREAD_DETACH/PROCESS_DETACH) that code is skipped
+        // by the b.ne in PEISDLL1 and x25 holds the caller's garbage —
+        // observed on Win11 24H2 ARM64: x25 == the stub entry address, so
+        // the jump landed at image_base + entry_RVA + OEP_RVA, outside the
+        // mapped image (0xC0000005 execute-non-executable; deterministic,
+        // only bites when the sum exceeds SizeOfImage — small DLLs land on
+        // random bytes inside the image and misbehave differently). Seed
+        // x25 from hModule here so PEDOJUMP is correct on every path;
+        // PEMAIN01 recomputes x25 to the same value during PROCESS_ATTACH.
+        mov     x25, x0
 section PEISEFI0
         stp     x0, x1, [sp, #-0x10]!
 
